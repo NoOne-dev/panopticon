@@ -61,6 +61,27 @@ def make_filename(message):
         )
 
 
+# This builds the relative file path & filename to log audits to,
+#   based on the channel type of the message.
+# It is affixed to the log directory set in config.py
+def make_audit_filename(event, guild):
+    time = datetime.datetime.utcnow()
+    timestamp = time.strftime('%F')
+
+    if event == "on_guild_add" or event == "on_guild_remove":
+        return "{}/AUDIT/{}.log".format(
+            config['log_dir'],
+            timestamp
+        )
+    else:
+        return "{}/{}-{}/AUDIT/{}.log".format(
+            config['log_dir'],
+            clean_filename(guild.name),
+            guild.id,
+            timestamp
+        )
+
+
 # Uses a Message object to build a very pretty string.
 # Format:
 #   (messageid) [21:30:00] <user#0000> hello world
@@ -100,6 +121,79 @@ def make_message(message):
     ))
 
 
+# Uses a Guild event to build a very pretty string.
+# Format:
+#    [%h:%m:%s] (event) <User:user#0000>(ID:0000000000000000)
+
+def make_audit_ban(event, guild, user):
+    # Get the current datetime
+    # If necessary, tell the naive datetime object it's in UTC
+    #   and convert to localtime
+    time = datetime.datetime.utcnow()
+    if config['use_localtime']:
+        time = time.replace(tzinfo=timezone.utc).astimezone(tz=None)
+
+    # Convert the datetime to a string in [21:30:00] format
+    timestamp = time.strftime('[%H:%M:%S]')
+
+    if event == "on_member_ban":
+        type = "[BAN]"
+    elif event == "on_member_unban":
+        type = "[UNBAN]"
+    else:
+        return
+
+    # Get the member's name, in distinct form, and wrap it
+    # in IRC-style brackets
+    member = "<User:{}#{}>(ID:{})".format(
+        user.name,
+        user.discriminator,
+        user.id
+    )
+
+    # Use all of this to return as one string
+    return("{} {} {}".format(
+        timestamp,
+        type,
+        member
+    ))
+
+
+def make_audit(event, guild):
+    # Get the current datetime
+    # If necessary, tell the naive datetime object it's in UTC
+    #   and convert to localtime
+    time = datetime.datetime.utcnow()
+    if config['use_localtime']:
+        time = time.replace(tzinfo=timezone.utc).astimezone(tz=None)
+
+    # Convert the datetime to a string in [21:30:00] format
+    timestamp = time.strftime('[%H:%M:%S]')
+
+    if event == "on_guild_unavailable":
+        type = "[GUILD OFFLINE]"
+    elif event == "on_guild_available":
+        type = "[GUILD ONLINE]"
+    elif event == "on_guild_remove":
+        type = "[GUILD REMOVED/BANNED]"
+    elif event == "on_guild_add":
+        type = "[GUILD ADDED]"
+    else:
+        return
+
+    guildinfo = "<Guild:{}>(ID:{})".format(
+        guild.name,
+        guild.id
+    )
+
+    # Use all of this to return as one string
+    return("{} {} {}".format(
+        timestamp,
+        type,
+        guildinfo
+    ))
+
+
 # Append to file, creating path if necessary
 def write(filename, string):
     os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -127,6 +221,66 @@ async def on_message_edit(_, message):
     string = make_message(message)
     write(filename, string)
     print(string)
+
+# On guild ban
+@client.event
+async def on_member_ban(guild, member):
+    event = "on_member_ban"
+    if guild and guild.id in IGNORE_GUILDS:
+        return
+    filename = make_audit_filename(event, guild)
+    string = make_audit_ban(event, guild, member)
+    write(filename, string)
+
+# On guild unban
+@client.event
+async def on_member_unban(guild, user):
+    event = "on_member_unban"
+    if guild and guild.id in IGNORE_GUILDS:
+        return
+    filename = make_audit_filename(event, guild)
+    string = make_audit_ban(event, guild, user)
+    write(filename, string)
+
+# On guild availability change
+@client.event
+async def on_guild_available(guild):
+    event = "on_guild_available"
+    if guild and guild.id in IGNORE_GUILDS:
+        return
+    filename = make_audit_filename(event, guild)
+    string = make_audit(event, guild)
+    write(filename, string)
+
+@client.event
+async def on_guild_unavailable(guild):
+    event = "on_guild_unavailable"
+    if guild and guild.id in IGNORE_GUILDS:
+        return
+    guildfix = utils.find(lambda m: m.id == guild.id, discord.Client.guilds)
+    filename = make_audit_filename(event, guildfix)
+    string = make_audit(event, guildfix)
+    write(filename, string)
+
+# On guild remove
+@client.event
+async def on_guild_remove(guild):
+    event = "on_guild_remove"
+    if guild and guild.id in IGNORE_GUILDS:
+        return
+    filename = make_audit_filename(event, guild)
+    string = make_audit(event, guild)
+    write(filename, string)
+
+# On guild add
+@client.event
+async def on_guild_add(guild):
+    event = "on_guild_add"
+    if guild and guild.id in IGNORE_GUILDS:
+        return
+    filename = make_audit_filename(event, guild)
+    string = make_audit(event, guild)
+    write(filename, string)
 
 @client.event
 async def on_ready():
